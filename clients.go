@@ -14,7 +14,7 @@ import (
 )
 
 type client interface {
-	do() (code int, msTaken uint64, err error)
+	do() (code int, usTaken uint64, err error)
 }
 
 type bodyStreamProducer func() (io.ReadCloser, error)
@@ -22,9 +22,10 @@ type bodyStreamProducer func() (io.ReadCloser, error)
 type clientOpts struct {
 	HTTP2 bool
 
-	maxConns  uint64
-	timeout   time.Duration
-	tlsConfig *tls.Config
+	maxConns          uint64
+	timeout           time.Duration
+	tlsConfig         *tls.Config
+	disableKeepAlives bool
 
 	headers     *headersList
 	url, method string
@@ -73,7 +74,7 @@ func newFastHTTPClient(opts *clientOpts) client {
 }
 
 func (c *fasthttpClient) do() (
-	code int, msTaken uint64, err error,
+	code int, usTaken uint64, err error,
 ) {
 	// prepare the request
 	req := fasthttp.AcquireRequest()
@@ -85,6 +86,11 @@ func (c *fasthttpClient) do() (
 		req.Header.SetHost(c.host)
 	}
 	req.Header.SetMethod(c.method)
+	if c.client.IsTLS {
+		req.URI().SetScheme("https")
+	} else {
+		req.URI().SetScheme("http")
+	}
 	req.SetRequestURI(c.requestURI)
 	if c.body != nil {
 		req.SetBodyString(*c.body)
@@ -104,7 +110,7 @@ func (c *fasthttpClient) do() (
 	} else {
 		code = resp.StatusCode()
 	}
-	msTaken = uint64(time.Since(start).Nanoseconds() / 1000)
+	usTaken = uint64(time.Since(start).Nanoseconds() / 1000)
 
 	// release resources
 	fasthttp.ReleaseRequest(req)
@@ -129,6 +135,7 @@ func newHTTPClient(opts *clientOpts) client {
 	tr := &http.Transport{
 		TLSClientConfig:     opts.tlsConfig,
 		MaxIdleConnsPerHost: int(opts.maxConns),
+		DisableKeepAlives:   opts.disableKeepAlives,
 	}
 	tr.DialContext = httpDialContextFunc(opts.bytesRead, opts.bytesWritten)
 	if opts.HTTP2 {
@@ -161,7 +168,7 @@ func newHTTPClient(opts *clientOpts) client {
 }
 
 func (c *httpClient) do() (
-	code int, msTaken uint64, err error,
+	code int, usTaken uint64, err error,
 ) {
 	req := &http.Request{}
 
@@ -201,7 +208,7 @@ func (c *httpClient) do() (
 			err = cerr
 		}
 	}
-	msTaken = uint64(time.Since(start).Nanoseconds() / 1000)
+	usTaken = uint64(time.Since(start).Nanoseconds() / 1000)
 
 	return
 }
